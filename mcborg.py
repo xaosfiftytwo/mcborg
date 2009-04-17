@@ -954,60 +954,76 @@ class McBorg:
 
 		done = False
 		while not done:
-			#create a dictionary wich will contain all the words we can found before the "chosen" word
-			post_words = {"" : 0}
-			word = str(sentence[-1].split(" ")[-1])
+			#create a dictionary wich will contain all the words we can find after the "chosen" word
+			post_words = {}
+			# word = str(sentence[-1].split(" ")[-1])
+			word = sentence[-1]
 			for x in xrange(0, len(self.words[word]) ):
 				l, w = struct.unpack("iH", self.words[word][x])
 				context = self.lines[l][0]
 				num_context = self.lines[l][1]
 				cwords = context.split()
-				#look if we can found a pair with the choosen word, and the next one
-				if len(sentence) > 1:
-					if sentence[len(sentence)-2] != cwords[w-1]:
-						continue
+				self.logger.debug('x=%d: w=%d; context=%s; num_context=%d' % (x, w, context, num_context))
+				#look if we can find a pair with the chosen word, and the next one
+				# if len(sentence) > 1:
+				# 	if sentence[len(sentence)-2] != cwords[w-1]:
+				# 		continue
 
 				if w < len(cwords)-1:
-					#if the word is in ignore_list, look the next word
-					look_for = cwords[w+1]
-					if look_for in self.settings.ignore_list and w < len(cwords) -2:
-						look_for = look_for+" "+cwords[w+2]
-
-					if not(post_words.has_key(look_for)):
-						post_words[look_for] = num_context
-					else :
-						post_words[look_for] += num_context
+					# if the word is in ignore_list, look for the next word
+					nw = w + 1
+					while nw < len(cwords):
+						look_for = cwords[nw]
+						if look_for in self.settings.ignore_list:
+							nw = nw + 1
+						else:
+							if not(post_words.has_key(look_for)):
+								post_words[look_for] = num_context
+							else :
+								post_words[look_for] += num_context
+							break
 				else:
-					post_words[""] += num_context
-			#Sort the words
-			liste = post_words.items()
-			liste.sort(lambda x,y: cmp(y[1],x[1]))
-			numbers = [liste[0][1]]
-			
-			for x in xrange(1, len(liste) ):
-				numbers.append(liste[x][1] + numbers[x-1])
+					pass
 
-			#take one them from the list ( randomly )
-			mot = randint(0, numbers[len(numbers) -1])
-			for x in xrange(0, len(numbers)):
-				if mot <= numbers[x]:
-					mot = liste[x][0]
-					break
-
-			x = -1
-			while mot in sentence:
-				x += 1
-				if x >= len(liste) -1:
-					mot = ''
-					break
-				mot = liste[x][0]
-
-
-			mot = mot.split(" ")
-			if mot == ['']:
+			self.logger.debug('post_words: %s' % post_words)
+			if len(post_words) == 0:
 				done = True
 			else:
-				map( (lambda x: sentence.append(x) ), mot )
+				items = post_words.items()
+				shuffle(items)
+				self.logger.debug('items shuffled: %s' % items)
+				picked, num_context = items[0]
+				sentence.append(picked)
+
+			#Sort the words
+			# liste = post_words.items()
+			# liste.sort(lambda x,y: cmp(y[1],x[1]))
+			# numbers = [liste[0][1]]
+			
+			# for x in xrange(1, len(liste) ):
+			# 	numbers.append(liste[x][1] + numbers[x-1])
+
+			#take one them from the list ( randomly )
+			# mot = randint(0, numbers[len(numbers) -1])
+			# for x in xrange(0, len(numbers)):
+			# 	if mot <= numbers[x]:
+			# 		mot = liste[x][0]
+			# 		break
+
+			# x = -1
+			# while mot in sentence:
+			# 	x += 1
+			# 	if x >= len(liste) -1:
+			# 		mot = ''
+			# 		break
+			# 	mot = liste[x][0]
+
+
+			# mot = mot.split(" ")
+			# if mot == ['']:
+			# 	done = True
+			# else:
+			# 	map( (lambda x: sentence.append(x) ), mot )
 
 		sentence = pre_words[:-2] + sentence
 
