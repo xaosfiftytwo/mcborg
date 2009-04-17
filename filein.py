@@ -24,33 +24,32 @@ import sys
 
 import mcborg
 
-class ModFileIn:
+class FileInput:
 	"""
 	Module for file input. Learning from ASCII text files.
+	Takes its input from sys.stdin.
 	"""
 
 	# Command list for this module
 	commandlist = "FileIn Module Commands:\nNone"
 	commanddict = {}
 	
-	def __init__(self, Borg, args):
+	def __init__(self, borg, args):
 
-		# f = open(args[1], "r")
+		import logging
+		self.logger = logging.getLogger('logger')
 		
-		buffer = sys.stdin.read()
-		# f.close()
+		buf = sys.stdin.read()
 
-		print "I knew "+`Borg.settings.num_words`+" words ("+`len(Borg.lines)`+" lines) before"
-		buffer = mcborg.filter_message(buffer, Borg)
+ 		self.logger.info("I knew %s words (%d lines) before." % (borg.settings.num_words, len(borg.lines)))
+		buf = mcborg.filter_message(buf, borg)
 		# Learn from input
 		try:
-			print buffer
-			Borg.learn(buffer)
+			borg.learn(buf)
 		except KeyboardInterrupt, e:
 			# Close database cleanly
-			print "Premature termination :-("
-		print "I know "+`Borg.settings.num_words`+" words ("+`len(Borg.lines)`+" lines) now."
-		del Borg
+			self.logger.error("Premature termination :-(", exc_info=True)
+ 		self.logger.info("I know %s words (%d lines) now." % (borg.settings.num_words, len(borg.lines)))
 
 	def shutdown(self):
 		pass
@@ -62,12 +61,18 @@ class ModFileIn:
 		pass
 
 if __name__ == "__main__":
-	# if len(sys.argv) < 2:
-	# 	print "Specify a filename."
-	# 	sys.exit()
-	# start the mcborg
-	my_mcborg = mcborg.mcborg()
-	ModFileIn(my_mcborg, sys.argv)
-	my_mcborg.save_all()
-	del my_mcborg
+	import logging
+	logger = logging.getLogger('logger')
+	handler = logging.FileHandler('trace.log')
+	format = logging.Formatter('%(asctime)s %(module)s %(lineno)d %(levelname)s %(message)s')
+	handler.setFormatter(format)
+	handler.setLevel(logging.DEBUG)
+	logger.addHandler(handler)
+	logger.setLevel(logging.DEBUG)
+
+	logger.debug('#------- start program %s ----------#' % sys.argv[0])
+	myborg = mcborg.McBorg()
+	FileInput(myborg, sys.argv)
+	myborg.save_all()
+	del myborg
 

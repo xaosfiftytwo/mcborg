@@ -23,3 +23,14 @@ words.txt
 xaosfiftytwo_ConsoleLog_20090201.txt
 *.pyc
 *~
+*.bak
+*.pyo
+*.dat
+*.log
+reply.py
+result
+server01.py
+server02.py
+tr01.py
+version
+server.py

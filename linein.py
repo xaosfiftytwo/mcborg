@@ -24,7 +24,7 @@ import sys
 
 import mcborg
 
-class ModLineIn:
+class LineInput:
 	"""
 	Module to interface console input and output with the Mcborg learn
 	and reply modules. Allows offline chat with Mcborg.
@@ -34,6 +34,8 @@ class ModLineIn:
 	commanddict = { "quit": "Usage: !quit\nQuits mcborg and saves the dictionary" }
 
 	def __init__(self, my_mcborg):
+		import logging
+		self.logger=logging.getLogger('logger')
 		self.mcborg = my_mcborg
 		self.start()
 
@@ -71,12 +73,22 @@ class ModLineIn:
 		print message
 
 if __name__ == "__main__":
+	import logging
+	logger = logging.getLogger('logger')
+	handler = logging.FileHandler('trace.log')
+	format = logging.Formatter('%(asctime)s %(module)s %(lineno)d %(levelname)s %(message)s')
+	handler.setFormatter(format)
+	handler.setLevel(logging.DEBUG)
+	logger.addHandler(handler)
+	logger.setLevel(logging.DEBUG)
+
+	logger.debug('#------- start program %s ----------#' % sys.argv[0])
 	# start the mcborg
-	my_mcborg = mcborg.mcborg()
+	myborg = mcborg.McBorg()
 	try:
-		ModLineIn(my_mcborg)
+		LineInput(myborg)
 	except SystemExit:
 		pass
-	my_mcborg.save_all()
-	del my_mcborg
+	myborg.save_all()
+	del myborg
 

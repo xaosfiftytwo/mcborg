@@ -34,6 +34,7 @@ import time
 import zipfile
 import re
 
+import cfgfile
 
 def filter_message(message, bot):
 	"""
@@ -42,50 +43,43 @@ def filter_message(message, bot):
 	padding ? and ! with ". " so they also terminate lines
 	and converting to lower case.
 	"""
+	import logging
+	logger=logging.getLogger('logger')
+	logger.info('in filter_message')
 	
-	
+	logger.debug('incoming message:')
+	logger.debug(message)
 	# to lowercase
 	message = message.lower()
 
-	# remove garbage
-	message = message.replace("\"", "") # remove "s
-	message = message.replace("\n", " ") # remove newlines
-	message = message.replace("\r", " ") # remove carriage returns
-
 	# remove matching brackets (unmatched ones are likely smileys :-) *cough*
-	# should except out when not found.
-	index = 0
-	try:
-		while 1:
-			index = message.index("(", index)
-			# Remove matching ) bracket
-			i = message.index(")", index+1)
-			message = message[0:i]+message[i+1:]
-			# And remove the (
-			message = message[0:index]+message[index+1:]
-	except ValueError, e:
-		pass
+	# on a per sentence basis.
+	sentences = message.split('\r\n')
+	import textproc
+	for index, sentence in enumerate(sentences):
+		sentences[index] = textproc.removed_balanced_brackets(sentences[index])
 
-	message = message.replace(";", ",")
-	message = message.replace("?", " ? ")
-	message = message.replace("!", " ! ")
-	message = message.replace(".", " . ")
-	message = message.replace(",", " , ")
-	message = message.replace("'", " ' ")
-	message = message.replace(":", " : ")
+	message = ' '.join(sentences)
 
-	# Find ! and ? and append full stops.
-#	message = message.replace(". ", ".. ")
-#	message = message.replace("? ", "?. ")
-#	message = message.replace("! ", "!. ")
-
-	#And correct the '...'
-#	message = message.replace("..  ..  .. ", ".... ")
+        # do all following substitutions in one single pass over message.
+	# subdict: substitution dictionary
+	subdict = {"\"": "",
+		   ";": " ",
+		   "?": " . ",
+		   "!": " . ",
+		   ".": " . ",
+		   ",": " , ",
+		   "'": " ' ",
+		   "<": "",
+		   ">": "",
+		   "#": "",
+		   }
+	message = textproc.multiple_replace(message, subdict)
 
 	words = message.split()
 	if bot.settings.process_with == "mcborg":
 		for x in xrange(0, len(words)):
-			#is there aliases ?
+			# are there aliases ?
 			for z in bot.settings.aliases.keys():
 				for alias in bot.settings.aliases[z]:
 					pattern = "^%s$" % alias
@@ -96,11 +90,11 @@ def filter_message(message, bot):
 	return message
 
 
-class mcborg:
-	import re
-	import cfgfile
+class McBorg:
+	# import re
+	# import cfgfile
 
-	ver_string = "I am a version 1.1.0 Mcborg"
+	ver_string = "I am a version 1.1.0 McBorg"
 	saves_version = "1.1.0"
 
 	# Main command list
@@ -129,22 +123,17 @@ class mcborg:
 		"""
 		Open the dictionary. Resize as required.
 		"""
-		# Attempt to load settings
-		self.settings = self.cfgfile.cfgset()
-		self.settings.load("mcborg.cfg",
-			{ "num_contexts": ("Total word contexts", 0),
-			  "num_words":	("Total unique words known", 0),
-			  "max_words":	("max limits in the number of words known", 6000),
-			  "learning":	("Allow the bot to learn", 1),
-			  "ignore_list":("Words that can be ignored for the answer", ['!.', '?.', "'", ',', ';']),
-			  "censored":	("Don't learn the sentence if one of those words is found", []),
-			  "num_aliases":("Total of aliases known", 0),
-			  "aliases":	("A list of similars words", {}),
-			  "process_with":("Wich way for generate the reply ( mcborg|megahal)", "mcborg"),
-			  "no_save"	:("If True, Mcborg don't saves the dictionary and configuration on disk", "False")
-			} )
+		import logging
+		self.logger=logging.getLogger('logger')
+		self.logger.info('in __init__()')
 
-		self.answers = self.cfgfile.cfgset()
+		self.zipfile='archive.zip'
+
+		# Attempt to load settings
+		self.settings = cfgfile.BorgConfig()
+		self.settings.load("mcborg.cfg", None)
+
+		self.answers = cfgfile.BorgConfig()
 		self.answers.load("answers.txt",
 			{ "sentences":	("A list of prepared answers", {})
 			} )
@@ -154,21 +143,21 @@ class mcborg:
 		if self.settings.process_with == "mcborg":
 			print "Reading dictionary..."
 			try:
-				zfile = zipfile.ZipFile('archive.zip','r')
+				zfile = zipfile.ZipFile(self.zipfile,'r')
 				for filename in zfile.namelist():
 					data = zfile.read(filename)
 					file = open(filename, 'w+b')
 					file.write(data)
 					file.close()
 			except (EOFError, IOError), e:
-				print "no zip found"
+				self.logger.error("Error handling %s" % self.zipfile, exc_info=True)
 			try:
 
 				f = open("version", "rb")
 				s = f.read()
 				f.close()
 				if s != self.saves_version:
-					print "Error loading dictionary\Please convert it before launching mcborg"
+					self.logger.critical("Version mismatch.\nPlease convert the dictionary before launching mcborg.")
 					sys.exit(1)
 
 				f = open("words.dat", "rb")
@@ -185,11 +174,11 @@ class mcborg:
 				# Create mew database
 				self.words = {}
 				self.lines = {}
-				print "Error reading saves. New database created."
+				self.logger.error("Error reading saves. New database created.")
 
 			# Is a resizing required?
 			if len(self.words) != self.settings.num_words:
-				print "Updating dictionary information..."
+				self.logger.info("Resizing required: updating dictionary information..")
 				self.settings.num_words = len(self.words)
 				num_contexts = 0
 				# Get number of contexts
@@ -200,29 +189,29 @@ class mcborg:
 				self.settings.save()
 				
 			# Is an aliases update required ?
-			compteur = 0
+			count = 0
 			for x in self.settings.aliases.keys():
-				compteur += len(self.settings.aliases[x])
-			if compteur != self.settings.num_aliases:
-				print "check dictionary for new aliases"
-				self.settings.num_aliases = compteur
+				count += len(self.settings.aliases[x])
+			if count != self.settings.num_aliases:
+				self.logger.info("Checking dictionary for new aliases..")
+				self.settings.num_aliases = count
 
 				for x in self.words.keys():
-					#is there aliases ?
+					# are there aliases ?
 					if x[0] != '~':
 						for z in self.settings.aliases.keys():
 							for alias in self.settings.aliases[z]:
 								pattern = "^%s$" % alias
 								if self.re.search(pattern, x):
-									print "replace %s with %s" %(x, z)
+									self.logger.info("replace %s with %s" %(x, z))
 									self.replace(x, z)
 
 				for x in self.words.keys():
 					if not (x in self.settings.aliases.keys()) and x[0] == '~':
-						print "unlearn %s" % x
+						self.logger.info("Unlearn %s.." % x)
 						self.settings.num_aliases -= 1
 						self.unlearn(x)
-						print "unlearned aliases %s" % x
+						self.logger.info("Unlearned aliases %s" % x)
 
 
 			#unlearn words in the unlearn.txt file.
@@ -239,6 +228,7 @@ class mcborg:
 				# No words to unlearn
 				pass
 
+		self.logger.debug('Save configuration settings..')		 
 		self.settings.save()
 
 
@@ -248,14 +238,14 @@ class mcborg:
 			print "Writing dictionary..."
 
 			try:
-				zfile = zipfile.ZipFile('archive.zip','r')
+				zfile = zipfile.ZipFile(self.zipfile,'r')
 				for filename in zfile.namelist():
 					data = zfile.read(filename)
 					file = open(filename, 'w+b')
 					file.write(data)
 					file.close()
 			except (OSError, IOError), e:
-				print "no zip found. Is the programm launch for first time ?"
+				self.logger.error("No zip found. Creating new database.")
 
 
 			f = open("words.dat", "wb")
@@ -274,7 +264,7 @@ class mcborg:
 
 
 			#zip the files
-			f = zipfile.ZipFile('archive.zip','w',zipfile.ZIP_DEFLATED)
+			f = zipfile.ZipFile(self.zipfile,'w',zipfile.ZIP_DEFLATED)
 			f.write('words.dat')
 			f.write('lines.dat')
 			f.write('version')
@@ -285,16 +275,18 @@ class mcborg:
 				os.remove('lines.dat')
 				os.remove('version')
 			except (OSError, IOError), e:
-				print "could not remove the files"
+				self.logger.error("Could not remove decompressed files")
 
 			f = open("words.txt", "w")
 			# write each words known
 			wordlist = []
-			#Sort the list befor to export
+			# Sort the list before export
 			for key in self.words.keys():
 				wordlist.append([key, len(self.words[key])])
-			wordlist.sort(lambda x,y: cmp(x[1],y[1]))
-			map( (lambda x: f.write(str(x[0])+"\n\r") ), wordlist)
+			wordlist.sort(lambda x,y: cmp(x[0],y[0]))
+			self.logger.debug('wordlist:')
+			self.logger.debug(wordlist)
+			map( (lambda x: f.write('%s\n\r' % x[0])), wordlist)
 			f.close()
 
 			f = open("sentences.txt", "w")
@@ -309,6 +301,7 @@ class mcborg:
 
 
 			# Save settings
+			self.logger.info('Save configuration settings..')
 			self.settings.save()
 
 	def process_msg(self, io_module, body, replyrate, learn, args, owner=0):
@@ -375,7 +368,7 @@ class mcborg:
 			if message == "":
 				return
 			# else output
-			if owner==0: time.sleep(.2*len(message))
+			## if owner==0: time.sleep(.2*len(message))
 			io_module.output(message, args)
 	
 	def do_commands(self, io_module, body, args, owner):
@@ -806,10 +799,11 @@ class mcborg:
 				self.settings.num_words = self.settings.num_words - 1
 				print "\"%s\" vaped totally" %x
 
-	def reply(self, body):
+	def reply(self, body, known_min=3):
 		"""
 		Reply to a line of text.
 		"""
+		self.logger.debug('in reply(%s)' % body)
 		# split sentences into list of words
 		_words = body.split(" ")
 		words = []
@@ -817,18 +811,22 @@ class mcborg:
 			words += i.split()
 		del _words
 
+		self.logger.debug('words:%s' % words)
+		
 		if len(words) == 0:
+			self.logger.debug('no reply (no input)')
 			return ""
 		
 		#remove words on the ignore list
 		#words = filter((lambda x: x not in self.settings.ignore_list and not x.isdigit() ), words)
 		words = [x for x in words if x not in self.settings.ignore_list and not x.isdigit()]
 
-		# Find rarest word (excluding those unknown)
+		# Find best known words
 		index = []
 		known = -1
-		#The word has to bee seen in already 3 contexts differents for being choosen
-		known_min = 3
+		# The word must be seen in 3 different contexts for being choosen
+		# known_min = 3
+		# known_min is now an argument in the reply call
 		for x in xrange(0, len(words)):
 			if self.words.has_key(words[x]):
 				k = len(self.words[words[x]])
@@ -841,78 +839,107 @@ class mcborg:
 			elif k == known:
 				index.append(words[x])
 				continue
-		# Index now contains list of rarest known words in sentence
+		# Index now contains list of best known words in sentence
 		if len(index)==0:
+			self.logger.debug('no reply (minimum number of contexts)')
 			return ""
-		word = index[randint(0, len(index)-1)]
+		self.logger.debug('index = %s' % index)
+		# choose word from  the list of best known words at random
+		# word = index[randint(0, len(index)-1)]
+		word = sample(index, 1)[0]
+		self.logger.debug('picked: %s' % word)
 
 		# Build sentence backwards from "chosen" word
 		sentence = [word]
-		done = 0
-		while done == 0:
-			#create a dictionary wich will contain all the words we can found before the "chosen" word
-			pre_words = {"" : 0}
-			#this is for prevent the case when we have an ignore_listed word
-			word = str(sentence[0].split(" ")[0])
-			for x in xrange(0, len(self.words[word]) -1 ):
+		done = False
+		while not done:
+			#create a dictionary wich will contain all the words we can find before the "chosen" word
+			pre_words = {}
+			word = sentence[0]
+			for x in xrange(0, len(self.words[word])):
 				l, w = struct.unpack("iH", self.words[word][x])
 				context = self.lines[l][0]
 				num_context = self.lines[l][1]
+				self.logger.debug('x=%d: w=%d; context=%s; num_context=%d' % (x, w, context, num_context))
 				cwords = context.split()
-				#if the word is not the first of the context, look the previous one
+				# if the word is not the first in context, look at the previous one
 				if cwords[w] != word:
-					print context
-				if w:
-					#look if we can found a pair with the choosen word, and the previous one
-					if len(sentence) > 1 and len(cwords) > w+1:
-						if sentence[1] != cwords[w+1]:
-							continue
+					self.logger.debug('program error?')
 
-					#if the word is in ignore_list, look the previous word
-					look_for = cwords[w-1]
-					if look_for in self.settings.ignore_list and w > 1:
-						look_for = cwords[w-2]+" "+look_for
+				if w > 0:
+					# look if we can find a pair with the chosen word, and the previous one
+					# if len(sentence) > 1 and len(cwords) > w+1:
+					# 	if sentence[1] != cwords[w+1]:
+					# 		continue
 
-					#saves how many times we can found each word
-					if not(pre_words.has_key(look_for)):
-						pre_words[look_for] = num_context
-					else :
-						pre_words[look_for] += num_context
-
+					# if the word is in ignore_list, look at the previous word
+					pw=w-1
+					while pw >= 0: 
+						look_for = cwords[pw]
+						if look_for in self.settings.ignore_list:
+							pw = pw - 1
+						else:
+							# save how many times we can find each word
+							if not(pre_words.has_key(look_for)):
+								pre_words[look_for] = num_context
+							else :
+								pre_words[look_for] += num_context
+							break
 
 				else:
-					pre_words[""] += num_context
+					# w = 0: first word in context
+					pass		
+					# look_for = cwords[w]
+					# if look_for not in self.settings.ignore_list:
+					# 	if not(pre_words.has_key(look_for)):
+					# 		pre_words[look_for] = num_context
+					# 	else :
+					# 		pre_words[look_for] += num_context
 
-			#Sort the words
-			liste = pre_words.items()
-			liste.sort(lambda x,y: cmp(y[1],x[1]))
-			
-			numbers = [liste[0][1]]
-			for x in xrange(1, len(liste) ):
-				numbers.append(liste[x][1] + numbers[x-1])
-
-			#take one them from the list ( randomly )
-			mot = randint(0, numbers[len(numbers) -1])
-			for x in xrange(0, len(numbers)):
-				if mot <= numbers[x]:
-					mot = liste[x][0]
-					break
-
-			#if the word is already choosen, pick the next one
-			while mot in sentence:
-				x += 1
-				if x >= len(liste) -1:
-					mot = ''
-				mot = liste[x][0]
-
-			mot = mot.split(" ")
-			mot.reverse()
-			if mot == ['']:
-				done = 1
+			self.logger.debug('pre_words: %s' % pre_words)
+			if len(pre_words) == 0:
+				done = True
 			else:
-				map( (lambda x: sentence.insert(0, x) ), mot )
+				items = pre_words.items()
+				shuffle(items)
+				self.logger.debug('items shuffled: %s' % items)
+				picked, num_context = items[0]
+				sentence.insert(0, picked)
 
+			# Sort the words descending on num_context
+			# liste = pre_words.items()
+			# liste.sort(lambda x,y: cmp(y[1],x[1]))
+			# self.logger.debug('liste.sorted: %s' % liste)
+			
+			# numbers = [liste[0][1]]
+			# for x in xrange(1, len(liste) ):
+			# 	numbers.append(liste[x][1] + numbers[x-1])
+			# self.logger.debug('numbers: %s' % numbers)
+
+			# take one them from the list ( randomly )
+			# mot = randint(0, numbers[len(numbers) -1])
+			# for x in xrange(0, len(numbers)):
+			# 	if mot <= numbers[x]:
+			# 		mot = liste[x][0]
+			# 		break
+
+			# if the word is already chosen, pick the next one
+			# while mot in sentence:
+			# 	x += 1
+			# 	if x >= len(liste) -1:
+			# 		mot = ''
+			# 	mot = liste[x][0]
+
+			# mot = mot.split(" ")
+			# mot.reverse()
+			# if mot == ['']:
+			# 	done = True
+			# else:
+			# 	map( (lambda x: sentence.insert(0, x) ), mot )
+		# End of building backwards
+		
 		pre_words = sentence
+		self.logger.debug('pre_words: %s' % pre_words)
 		sentence = sentence[-2:]
 
 		# Now build sentence forwards from "chosen" word
@@ -921,12 +948,12 @@ class mcborg:
 		#cwords:	...	cwords[w-1]	cwords[w]	cwords[w+1]	cwords[w+2]
 		#sentence:	...	sentence[-2]	sentence[-1]	look_for	look_for ?
 
-		#we are looking, for a cwords[w] known, and maybe a cwords[w-1] known, what will be the cwords[w+1] to choose.
-		#cwords[w+2] is need when cwords[w+1] is in ignored list
+		# we are looking, for a cwords[w] known, and maybe a cwords[w-1] known, what will be the cwords[w+1] to choose.
+		# cwords[w+2] is need when cwords[w+1] is in ignored list
 
 
-		done = 0
-		while done == 0:
+		done = False
+		while not done:
 			#create a dictionary wich will contain all the words we can found before the "chosen" word
 			post_words = {"" : 0}
 			word = str(sentence[-1].split(" ")[-1])
@@ -978,7 +1005,7 @@ class mcborg:
 
 			mot = mot.split(" ")
 			if mot == ['']:
-				done = 1
+				done = True
 			else:
 				map( (lambda x: sentence.append(x) ), mot )
 
@@ -1005,8 +1032,7 @@ class mcborg:
 
 	def learn(self, body, num_context=1):
 		"""
-		Lines should be cleaned (filter_message()) before passing
-		to this.
+		Lines should be cleaned (filter_message()) before being passed to this.
 		"""
 
 		def learn_line(self, body, num_context):
@@ -1014,6 +1040,8 @@ class mcborg:
 			Learn from a sentence.
 			"""
 			import re
+			
+			self.logger.debug('in learn_line(%s, %d' % (body, num_context))
 
 			words = body.split()
 			# Ignore sentences of < 1 words XXX was <3
@@ -1037,22 +1065,20 @@ class mcborg:
 				for censored in self.settings.censored:
 					pattern = "^%s$" % censored
 					if re.search(pattern, words[x]):
-						print "Censored word %s" %words[x]
+						self.logger.info("--> line is not learned! (censored word %s)" % words[x])
 						return
 
-				if len(words[x]) > 13 \
-				or ( ((nb_voy*100) / len(words[x]) < 26) and len(words[x]) > 5 ) \
-				or ( char and digit ) \
-				or ( self.words.has_key(words[x]) == 0 and self.settings.learning == 0 ):
-					#if one word as more than 13 characters, don't learn
-					#		( in french, this represent 12% of the words )
-					#and d'ont learn words where there are less than 25% of voyels
-					#don't learn the sentence if one word is censored
-					#don't learn too if there are digits and char in the word
-					#same if learning is off
+				if len(words[x]) > 13:
+					self.logger.debug('--> line is not learned! (word too long)')
 					return
-				elif ( "-" in words[x] or "_" in words[x] ) :
-					words[x]="#nick"
+
+				if char and digit:
+					self.logger.debug('--> line is not learned! (mix of char and digits)')
+					return
+					
+				if  not self.settings.learning:
+					self.logger.debug('--> line is not learned! (learning is off)')
+					return
 
 
 			num_w = self.settings.num_words
@@ -1068,7 +1094,7 @@ class mcborg:
 
 			# Check context isn't already known
 			if not self.lines.has_key(hashval):
-				if not(num_cpw > 100 and self.settings.learning == 0):
+				if not num_cpw > 100 and self.settings.learning:
 					
 					self.lines[hashval] = [cleanbody, num_context]
 					# Add link for each word
@@ -1080,13 +1106,17 @@ class mcborg:
 							self.words[words[x]] = [ struct.pack("iH", hashval, x) ]
 							self.settings.num_words += 1
 						self.settings.num_contexts += 1
+				else:
+					self.logger.debug('--> line is not learned! (contexts per word > 100 or learning is off)')
 			else :
+				# known hash value
 				self.lines[hashval][1] += num_context
 
 			#is max_words reached, don't learn more
 			if self.settings.num_words >= self.settings.max_words: self.settings.learning = 0
 
-		# Split body text into sentences and parse them
-		# one by one.
-		body += " "
-		map ( (lambda x : learn_line(self, x, num_context)), body.split(". "))
+		# Split body text into sentences and parse them one by one.
+		body = '%s ' % body
+		map ( lambda x : learn_line(self, x, num_context), body.split(". "))
+		
+
